@@ -56,6 +56,9 @@ class CBZEditor:
         # Track if we are doing a partial refresh (top 4 images)
         self.partial_refresh = False
 
+        # Variable to track hotkey activation status
+        self.hotkeys_enabled = True
+
     def set_dark_theme(self):
         self.root.configure(bg='#2d2d2d')
         self.style = ttk.Style()
@@ -80,16 +83,17 @@ class CBZEditor:
         self.title_label.pack(pady=5, expand=True, fill=tk.X)
         control_frame = ttk.Frame(header_frame)
         control_frame.pack(pady=10)
+
+        # Series name input box (moved above the save button)
+        self.series_name_entry = ttk.Entry(control_frame, font=('Arial', 12), foreground='black')
+        self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
+
         ttk.Button(control_frame, text='📂 Open', command=self.open_cbz).pack(side=tk.LEFT, padx=5)
         self.save_btn = ttk.Button(control_frame, text='💾 Save', width=15, style='Large.TButton', command=self.save_and_next)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text='✖ Close', command=self.close_and_next).pack(side=tk.LEFT, padx=5)
 
-        # Series name input box
-        self.series_name_entry = ttk.Entry(control_frame, font=('Arial', 12))
-        self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
-
-        # Added label to show sorting order
+        # Added label to show sorting order (moved to the right of the thumbnail size slider)
         self.sort_label = ttk.Label(control_frame, text="  Order: First", font=('Arial', 10))
         self.sort_label.pack(side=tk.LEFT, padx=10)
 
@@ -107,6 +111,19 @@ class CBZEditor:
         self.canvas.create_window((0, 0), window=self.image_frame, anchor=tk.NW)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Disable hotkeys while typing in the series name input box
+        self.series_name_entry.bind("<FocusIn>", self.disable_hotkeys)
+        self.series_name_entry.bind("<FocusOut>", self.enable_hotkeys)
+        self.series_name_entry.bind("<Return>", self.enable_hotkeys)  # Also disable hotkeys on Enter
+
+    def disable_hotkeys(self, event=None):
+        """Disable hotkeys when the series name input box is focused."""
+        self.hotkeys_enabled = False
+
+    def enable_hotkeys(self, event=None):
+        """Enable hotkeys when the series name input box is unfocused."""
+        self.hotkeys_enabled = True
 
     def create_batch_button(self):
         batch_btn = ttk.Button(self.root, text='Batch Create CBZs', command=self.batch_create_cbzs)
@@ -363,7 +380,12 @@ class CBZEditor:
         new_filepath = os.path.join(os.path.dirname(self.current_cbz), new_filename)
 
         try:
-            os.rename(self.current_cbz, new_filepath)
+            # Save the file with changes (deleted images and edits)
+            with zipfile.ZipFile(new_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for file in os.listdir(self.temp_dir):
+                    if file not in self.deleted_files:  # Don't save deleted files
+                        zipf.write(os.path.join(self.temp_dir, file), arcname=file)
+
             self.current_cbz = new_filepath  # Update the current CBZ path
             self.show_status('Saved successfully!', 'green')
             return True
