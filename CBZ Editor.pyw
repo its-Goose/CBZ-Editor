@@ -50,6 +50,9 @@ class CBZEditor:
         # Bind the "s" key to toggle sorting order
         self.root.bind('s', lambda e: self.toggle_sort_order())
 
+        # Bind the "r" key to refresh thumbnails
+        self.root.bind('r', lambda e: self.refresh_thumbnails())
+
     def set_dark_theme(self):
         self.root.configure(bg='#2d2d2d')
         self.style = ttk.Style()
@@ -171,6 +174,10 @@ class CBZEditor:
                 zip_ref.extractall(self.temp_dir)
             self.initialize_file_monitor()
             self.display_images()
+
+            # Update the sorting order label to reflect the default (ascending)
+            self.sort_label.config(text="  Order: First")
+
         except Exception as e:
             self.show_status(f'Error: {str(e)}', 'red')
             self.load_next_cbz()
@@ -224,13 +231,17 @@ class CBZEditor:
                                  key=lambda x: [(int(c) if c.isdigit() else c) for c in re.split('(\\d+)', x)], reverse=not self.sort_order)
         except:
             image_files = sorted(os.listdir(self.temp_dir), reverse=not self.sort_order)
-        
+
         for widget in self.image_frame.winfo_children():
             widget.destroy()
+
+        # Dynamically calculate the number of columns based on window width and thumbnail size
         canvas_width = self.canvas.winfo_width() - 20
         cols = max(1, int(canvas_width / (self.thumbnail_size + 20)))
+        
         for i in range(cols):
             self.image_frame.columnconfigure(i, weight=1, uniform='cols')
+
         row = col = 0
         for idx, filename in enumerate(image_files):
             if filename in self.deleted_files:
@@ -285,6 +296,11 @@ class CBZEditor:
 
     def update_thumbnail_size(self, event=None):
         self.thumbnail_size = int(self.size_slider.get())
+        self.needs_refresh = True
+        self.display_images()
+
+    def refresh_thumbnails(self):
+        """Refresh the thumbnails (reload the images)."""
         self.needs_refresh = True
         self.display_images()
 
