@@ -79,7 +79,7 @@ class CBZEditor:
         self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
 
         ttk.Button(control_frame, text='📂 Open', command=self.open_cbz).pack(side=tk.LEFT, padx=5)
-        self.save_btn = ttk.Button(control_frame, text='💾 Save', width=15, style='Large.TButton', command=self.save_and_next)
+        self.save_btn = ttk.Button(control_frame, text='💾 Save', width=15, style='TButton', command=self.save_and_next)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text='✖ Close', command=self.close_and_next).pack(side=tk.LEFT, padx=5)
 
@@ -218,17 +218,27 @@ class CBZEditor:
         while self.monitor_active and self.temp_dir:
             try:
                 current_files = set(os.listdir(self.temp_dir))
+    
                 for filename in current_files:
                     file_path = os.path.join(self.temp_dir, filename)
+    
                     if os.path.isfile(file_path):
                         current_mtime = os.path.getmtime(file_path)
-                        if (filename not in self.file_timestamps or current_mtime > self.file_timestamps[filename]):
+    
+                        # If the file is modified, update the image
+                        if filename not in self.file_timestamps or current_mtime > self.file_timestamps[filename]:
                             self.file_timestamps[filename] = current_mtime
                             self.root.after(0, self.update_single_image, file_path)
+    
+                # Only check files that were previously recorded, preventing double-deletion
                 for filename in list(self.file_timestamps.keys()):
                     if filename not in current_files:
+                        if filename in self.deleted_files:  # Skip files we deleted intentionally
+                            del self.file_timestamps[filename]
+                            continue
+                        
                         del self.file_timestamps[filename]
-                        self.root.after(0, self.delete_image, filename)
+    
                 time.sleep(1)
             except Exception as e:
                 print(f'Monitoring error: {e}')
@@ -345,7 +355,10 @@ class CBZEditor:
                 
             self.needs_refresh = True
             self.display_images()
+            self.save_btn.config(style="TButton")
+			
         except Exception as e:
+            print(f"Error deleting {filename}: {e}")  # Debugging
             self.show_status(f'Delete failed: {str(e)}', 'red')
 
     def update_thumbnail_size(self, event=None):
@@ -412,7 +425,7 @@ class CBZEditor:
 
     def show_status(self, message, color):
         self.save_btn.config(style=f'{color}.TButton')
-        self.root.after(2000, lambda: self.save_btn.config(style='Large.TButton'))
+        self.root.after(2000, lambda: self.save_btn.config(style='TButton'))
 
     def save_and_next(self):
         if self.current_cbz and self.save_cbz():
