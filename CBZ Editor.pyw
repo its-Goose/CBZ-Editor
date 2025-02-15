@@ -10,7 +10,6 @@ import threading
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 
-
 class CBZEditor:
 
     def __init__(self, root):
@@ -310,11 +309,32 @@ class CBZEditor:
         ttk.Button(btn_frame, text='Delete', command=lambda f=filename: self.delete_image(f)).pack(side=tk.LEFT)
 
     def edit_image(self, img_path):
+        """Open the image for editing and monitor for changes."""
         try:
             os.startfile(img_path)
             self.modified_files.add(img_path)
+            threading.Thread(target=self.monitor_image_changes, args=(img_path,), daemon=True).start()
         except Exception as e:
             self.show_status(f'Error opening image: {str(e)}', 'red')
+
+    def monitor_image_changes(self, img_path):
+        """Continuously monitor the image file for changes and refresh when updated."""
+        last_modified = os.path.getmtime(img_path)
+        
+        while self.monitor_active:
+            time.sleep(1)
+            if not os.path.exists(img_path):
+                break
+            try:
+                current_modified = os.path.getmtime(img_path)
+                if current_modified > last_modified:
+                    last_modified = current_modified
+                    self.root.after(0, self.update_single_image, img_path)
+                    break  # Stop monitoring once the update is detected
+            except Exception as e:
+                print(f'Error monitoring image: {e}')
+                break
+
 
     def delete_image(self, filename):
         try:
@@ -386,12 +406,17 @@ class CBZEditor:
                     if file not in self.deleted_files:  # Don't save deleted files
                         zipf.write(os.path.join(self.temp_dir, file), arcname=file)
 
+            # Delete the old CBZ file after saving the renamed one
+            if os.path.exists(self.current_cbz):
+                os.remove(self.current_cbz)
+
             self.current_cbz = new_filepath  # Update the current CBZ path
             self.show_status('Saved successfully!', 'green')
             return True
         except Exception as e:
             self.show_status(f'Save failed: {str(e)}', 'red')
             return False
+
 
     def show_status(self, message, color):
         self.save_btn.config(style=f'{color}.TButton')
