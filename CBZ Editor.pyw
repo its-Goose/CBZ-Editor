@@ -43,19 +43,10 @@ class CBZEditor:
         self.root.bind('<Right>', lambda e: self.load_next_cbz())
         self.canvas.bind_all('<MouseWheel>', self.on_mouse_wheel)
 
-        # New variable to track sorting order: True = ascending, False = descending
-        self.sort_order = True  # Default to ascending order
-
-        # Bind the "s" key to toggle sorting order
+        self.sort_order = True
         self.root.bind('s', lambda e: self.toggle_sort_order())
-
-        # Bind the "r" key to refresh thumbnails
         self.root.bind('r', lambda e: self.refresh_thumbnails())
-
-        # Track if we are doing a partial refresh (top 4 images)
         self.partial_refresh = False
-
-        # Variable to track hotkey activation status
         self.hotkeys_enabled = True
 
     def set_dark_theme(self):
@@ -83,7 +74,6 @@ class CBZEditor:
         control_frame = ttk.Frame(header_frame)
         control_frame.pack(pady=10)
 
-        # Series name input box (moved above the save button)
         self.series_name_entry = ttk.Entry(control_frame, font=('Arial', 12), foreground='black')
         self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -92,7 +82,6 @@ class CBZEditor:
         self.save_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text='✖ Close', command=self.close_and_next).pack(side=tk.LEFT, padx=5)
 
-        # Added label to show sorting order (moved to the right of the thumbnail size slider)
         self.sort_label = ttk.Label(control_frame, text="  Order: First", font=('Arial', 10))
         self.sort_label.pack(side=tk.LEFT, padx=10)
 
@@ -111,17 +100,14 @@ class CBZEditor:
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Disable hotkeys while typing in the series name input box
         self.series_name_entry.bind("<FocusIn>", self.disable_hotkeys)
         self.series_name_entry.bind("<FocusOut>", self.enable_hotkeys)
-        self.series_name_entry.bind("<Return>", self.enable_hotkeys)  # Also disable hotkeys on Enter
+        self.series_name_entry.bind("<Return>", self.enable_hotkeys)
 
     def disable_hotkeys(self, event=None):
-        """Disable hotkeys when the series name input box is focused."""
         self.hotkeys_enabled = False
 
     def enable_hotkeys(self, event=None):
-        """Enable hotkeys when the series name input box is unfocused."""
         self.hotkeys_enabled = True
 
     def create_batch_button(self):
@@ -188,7 +174,7 @@ class CBZEditor:
             os.makedirs(self.temp_dir, exist_ok=True)
             self.current_cbz = file_path
             self.title_label.config(text=f'Editing: {cbz_filename} ({self.current_index + 1}/{len(self.cbz_files)})')
-            self.sort_order = True  # Reset to ascending order when a new CBZ is loaded
+            self.sort_order = True
             self.image_cache.clear()
             self.modified_files.clear()
             self.deleted_files.clear()
@@ -198,8 +184,6 @@ class CBZEditor:
                 zip_ref.extractall(self.temp_dir)
             self.initialize_file_monitor()
             self.display_images()
-
-            # Update the sorting order label to reflect the default (ascending)
             self.sort_label.config(text="  Order: First")
 
         except Exception as e:
@@ -228,37 +212,39 @@ class CBZEditor:
                 for filename in list(self.file_timestamps.keys()):
                     if filename not in current_files:
                         del self.file_timestamps[filename]
-                        self.root.after(0, self.handle_deleted_file, filename)
+                        self.root.after(0, self.delete_image, filename)  # Fixed this line
                 time.sleep(1)
             except Exception as e:
                 print(f'Monitoring error: {e}')
                 break
 
+    def update_single_image(self, img_path):
+        """Update only the modified image's thumbnail without full refresh"""
+        filename = os.path.basename(img_path)
+        if filename in self.image_frames:
+            frame = self.image_frames[filename]
+            for widget in frame.winfo_children():
+                widget.destroy()
+            self.create_image_widgets(frame, img_path, filename)
+            self.image_frame.update_idletasks()
+            self.canvas.config(scrollregion=self.canvas.bbox('all'))
+
     def toggle_sort_order(self):
-        """Toggle the sorting order between ascending and descending."""
         self.sort_order = not self.sort_order
         self.needs_refresh = True
         self.display_images()
-
-        # Update the sort label based on the current sorting order
-        if self.sort_order:
-            self.sort_label.config(text="  Order: First")
-        else:
-            self.sort_label.config(text="  Order: Last")
+        self.sort_label.config(text="  Order: First" if self.sort_order else "  Order: Last")
 
     def display_images(self):
         if not self.temp_dir or not self.needs_refresh:
             return
         try:
-            # Sort the images based on the current sorting order (ascending or descending)
             image_files = sorted([f for f in os.listdir(self.temp_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))], 
                                  key=lambda x: [(int(c) if c.isdigit() else c) for c in re.split('(\\d+)', x)], reverse=not self.sort_order)
-
-            # Only show the top 4 images for quicker display
             if self.partial_refresh:
-                image_files = image_files[:4]  # Load top 4 images
+                image_files = image_files[:4]
             else:
-                self.partial_refresh = False  # Reset after full refresh
+                self.partial_refresh = False
 
         except:
             image_files = sorted(os.listdir(self.temp_dir), reverse=not self.sort_order)
@@ -266,7 +252,6 @@ class CBZEditor:
         for widget in self.image_frame.winfo_children():
             widget.destroy()
 
-        # Dynamically calculate the number of columns based on window width and thumbnail size
         canvas_width = self.canvas.winfo_width() - 20
         cols = max(1, int(canvas_width / (self.thumbnail_size + 20)))
         
@@ -309,7 +294,6 @@ class CBZEditor:
         ttk.Button(btn_frame, text='Delete', command=lambda f=filename: self.delete_image(f)).pack(side=tk.LEFT)
 
     def edit_image(self, img_path):
-        """Open the image for editing and monitor for changes."""
         try:
             os.startfile(img_path)
             self.modified_files.add(img_path)
@@ -318,9 +302,7 @@ class CBZEditor:
             self.show_status(f'Error opening image: {str(e)}', 'red')
 
     def monitor_image_changes(self, img_path):
-        """Continuously monitor the image file for changes and refresh when updated."""
         last_modified = os.path.getmtime(img_path)
-        
         while self.monitor_active:
             time.sleep(1)
             if not os.path.exists(img_path):
@@ -330,11 +312,10 @@ class CBZEditor:
                 if current_modified > last_modified:
                     last_modified = current_modified
                     self.root.after(0, self.update_single_image, img_path)
-                    break  # Stop monitoring once the update is detected
+                    break
             except Exception as e:
                 print(f'Error monitoring image: {e}')
                 break
-
 
     def delete_image(self, filename):
         try:
@@ -352,8 +333,7 @@ class CBZEditor:
         self.display_images()
 
     def refresh_thumbnails(self):
-        """Refresh the thumbnails (reload the images)."""
-        self.partial_refresh = False  # Full refresh
+        self.partial_refresh = False
         self.needs_refresh = True
         self.display_images()
 
@@ -383,40 +363,31 @@ class CBZEditor:
             self.show_status('No CBZ loaded!', 'red')
             return False
 
-        # Get the series name from the entry box
         series_name = self.series_name_entry.get().strip()
-
-        # Extract the chapter number from the current CBZ file name
         filename = os.path.basename(self.current_cbz)
         chapter_number = re.search(r'c\d{3}', filename)
         if chapter_number:
-            chapter_number = chapter_number.group(0)  # Get the matched chapter number
+            chapter_number = chapter_number.group(0)
         else:
             self.show_status('Invalid chapter number in file name', 'red')
             return False
 
-        # Rename the file with the format "Series Name - cXXX.cbz"
         new_filename = f"{series_name} - {chapter_number}.cbz"
         new_filepath = os.path.join(os.path.dirname(self.current_cbz), new_filename)
 
         try:
-            # Save the file with changes (deleted images and edits)
             with zipfile.ZipFile(new_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for file in os.listdir(self.temp_dir):
-                    if file not in self.deleted_files:  # Don't save deleted files
+                    if file not in self.deleted_files:
                         zipf.write(os.path.join(self.temp_dir, file), arcname=file)
-
-            # Delete the old CBZ file after saving the renamed one
             if os.path.exists(self.current_cbz):
                 os.remove(self.current_cbz)
-
-            self.current_cbz = new_filepath  # Update the current CBZ path
+            self.current_cbz = new_filepath
             self.show_status('Saved successfully!', 'green')
             return True
         except Exception as e:
             self.show_status(f'Save failed: {str(e)}', 'red')
             return False
-
 
     def show_status(self, message, color):
         self.save_btn.config(style=f'{color}.TButton')
@@ -462,7 +433,6 @@ class CBZEditor:
         self.current_index = 0
         self.load_current_cbz()
         loading_window.destroy()
-
 
 if __name__ == '__main__':
     root = tk.Tk()
