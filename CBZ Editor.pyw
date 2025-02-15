@@ -32,6 +32,7 @@ class CBZEditor:
         self.monitor_active = False
         self.file_timestamps = {}
         self.executor = ThreadPoolExecutor(max_workers=4)
+        self.swap_on_delete = tk.BooleanVar(value=False)
         self.set_dark_theme()
         self.create_widgets()
         self.create_batch_button()
@@ -92,6 +93,14 @@ class CBZEditor:
         self.size_slider.set(self.thumbnail_size)
         self.size_slider.pack(side=tk.LEFT, padx=5)
 
+        # Add swap on delete checkbox and label
+        self.swap_checkbox = ttk.Checkbutton(toolbar, 
+                                           variable=self.swap_on_delete,
+                                           command=self.update_swap_label)
+        self.swap_checkbox.pack(side=tk.LEFT, padx=10)
+        self.swap_label = ttk.Label(toolbar, text="Keep sort on Delete")
+        self.swap_label.pack(side=tk.LEFT)
+
         self.canvas = tk.Canvas(main_frame, bg='#2d2d2d', highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         self.image_frame = ttk.Frame(self.canvas)
@@ -103,6 +112,13 @@ class CBZEditor:
         self.series_name_entry.bind("<FocusIn>", self.disable_hotkeys)
         self.series_name_entry.bind("<FocusOut>", self.enable_hotkeys)
         self.series_name_entry.bind("<Return>", self.enable_hotkeys)
+
+    def update_swap_label(self):
+        """Update the swap label based on checkbox state"""
+        if self.swap_on_delete.get():
+            self.swap_label.config(text="Swap sort on Delete")
+        else:
+            self.swap_label.config(text="Keep sort on Delete")
 
     def disable_hotkeys(self, event=None):
         self.hotkeys_enabled = False
@@ -212,7 +228,7 @@ class CBZEditor:
                 for filename in list(self.file_timestamps.keys()):
                     if filename not in current_files:
                         del self.file_timestamps[filename]
-                        self.root.after(0, self.delete_image, filename)  # Fixed this line
+                        self.root.after(0, self.delete_image, filename)
                 time.sleep(1)
             except Exception as e:
                 print(f'Monitoring error: {e}')
@@ -322,6 +338,11 @@ class CBZEditor:
             img_path = os.path.join(self.temp_dir, filename)
             os.remove(img_path)
             self.deleted_files.add(filename)
+            
+            if self.swap_on_delete.get():
+                self.sort_order = not self.sort_order
+                self.sort_label.config(text="  Order: First" if self.sort_order else "  Order: Last")
+                
             self.needs_refresh = True
             self.display_images()
         except Exception as e:
