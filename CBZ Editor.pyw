@@ -14,7 +14,7 @@ class CBZEditor:
 
     def __init__(self, root):
         self.root = root
-        self.root.title('CBZ Editor Pro+')
+        self.root.title('CBZ Editor')
         self.root.geometry('1200x800')
         self.current_cbz = None
         self.temp_dir = None
@@ -28,14 +28,13 @@ class CBZEditor:
         self.resize_timer = None
         self.image_frames = {}
         self.base_temp_dir = os.path.join(tempfile.gettempdir(),
-            'CBZ_Editor_Pro_Temp')
+            'CBZ_Editor_Temp')
         self.monitor_active = False
         self.file_timestamps = {}
         self.executor = ThreadPoolExecutor(max_workers=4)
         self.swap_on_delete = tk.BooleanVar(value=False)
         self.set_dark_theme()
         self.create_widgets()
-        self.create_batch_button()
         self.root.bind('<Configure>', self.on_window_resize)
         self.root.bind('<Control-s>', lambda e: self.save_and_next())
         self.root.bind('<Control-S>', lambda e: self.save_and_next())
@@ -68,39 +67,43 @@ class CBZEditor:
         main_frame.pack(fill=tk.BOTH, expand=1)
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill=tk.X, pady=10)
-        ttk.Button(header_frame, text='←', width=3, command=self.load_previous_cbz).pack(side=tk.LEFT, padx=5)
-        ttk.Button(header_frame, text='→', width=3, command=self.load_next_cbz).pack(side=tk.RIGHT, padx=5)
         self.title_label = ttk.Label(header_frame, text='No CBZ Loaded', font=('Arial', 14, 'bold'))
-        self.title_label.pack(pady=5, expand=True, fill=tk.X)
+        self.title_label.pack(pady=5, expand=True, fill=tk.X, anchor='center')
         control_frame = ttk.Frame(header_frame)
         control_frame.pack(pady=10)
-
+    
+        batch_btn = ttk.Button(control_frame, text='Batch Create CBZs', command=self.batch_create_cbzs)
+        batch_btn.pack(side=tk.LEFT, padx=5)
+    
         self.series_name_entry = ttk.Entry(control_frame, font=('Arial', 12), foreground='black')
         self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
-
+    
         ttk.Button(control_frame, text='📂 Open', command=self.open_cbz).pack(side=tk.LEFT, padx=5)
         self.save_btn = ttk.Button(control_frame, text='💾 Save', width=15, style='TButton', command=self.save_and_next)
         self.save_btn.pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text='✏ Overwrite', command=self.save_overwrite_and_next).pack(side=tk.LEFT, padx=5)  # New Overwrite button
         ttk.Button(control_frame, text='✖ Close', command=self.close_and_next).pack(side=tk.LEFT, padx=5)
-
-        self.sort_label = ttk.Label(control_frame, text="  Order: First", font=('Arial', 10))
-        self.sort_label.pack(side=tk.LEFT, padx=10)
-
+    
         toolbar = ttk.Frame(main_frame)
         toolbar.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(toolbar, text='Thumbnail Size:').pack(side=tk.LEFT)
         self.size_slider = ttk.Scale(toolbar, from_=100, to=500, command=lambda e: self.update_thumbnail_size())
         self.size_slider.set(self.thumbnail_size)
         self.size_slider.pack(side=tk.LEFT, padx=5)
-
-        # Add swap on delete checkbox and label
+    
+        self.sort_label = ttk.Label(toolbar, text="  Order: First", font=('Arial', 10))
+        self.sort_label.pack(side=tk.LEFT, padx=10)
+    
         self.swap_checkbox = ttk.Checkbutton(toolbar, 
                                            variable=self.swap_on_delete,
-                                           command=self.update_swap_label)
+                                           command=self.update_swap_label,
+                                           style="TCheckbutton")
         self.swap_checkbox.pack(side=tk.LEFT, padx=10)
         self.swap_label = ttk.Label(toolbar, text="Keep sort on Delete")
         self.swap_label.pack(side=tk.LEFT)
-
+        
+        self.style.configure('TCheckbutton', foreground='black', font=('Arial', 12))
+    
         self.canvas = tk.Canvas(main_frame, bg='#2d2d2d', highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         self.image_frame = ttk.Frame(self.canvas)
@@ -108,13 +111,13 @@ class CBZEditor:
         self.canvas.create_window((0, 0), window=self.image_frame, anchor=tk.NW)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
+    
         self.series_name_entry.bind("<FocusIn>", self.disable_hotkeys)
         self.series_name_entry.bind("<FocusOut>", self.enable_hotkeys)
         self.series_name_entry.bind("<Return>", self.enable_hotkeys)
 
+
     def update_swap_label(self):
-        """Update the swap label based on checkbox state"""
         if self.swap_on_delete.get():
             self.swap_label.config(text="Swap sort on Delete")
         else:
@@ -350,15 +353,15 @@ class CBZEditor:
             self.deleted_files.add(filename)
             
             if self.swap_on_delete.get():
+                self.swap_on_delete.set(True)
                 self.sort_order = not self.sort_order
                 self.sort_label.config(text="  Order: First" if self.sort_order else "  Order: Last")
                 
             self.needs_refresh = True
             self.display_images()
             self.save_btn.config(style="TButton")
-			
+            
         except Exception as e:
-            print(f"Error deleting {filename}: {e}")  # Debugging
             self.show_status(f'Delete failed: {str(e)}', 'red')
 
     def update_thumbnail_size(self, event=None):
@@ -392,36 +395,51 @@ class CBZEditor:
         self.current_index += 1
         self.load_current_cbz()
 
-    def save_cbz(self):
+    def save_cbz(self, overwrite=False):
         if not self.current_cbz or not self.temp_dir:
             self.show_status('No CBZ loaded!', 'red')
             return False
 
-        series_name = self.series_name_entry.get().strip()
-        filename = os.path.basename(self.current_cbz)
-        chapter_number = re.search(r'c\d{3}', filename)
-        if chapter_number:
-            chapter_number = chapter_number.group(0)
-        else:
-            self.show_status('Invalid chapter number in file name', 'red')
-            return False
+        if not overwrite:
+            series_name = self.series_name_entry.get().strip()
+            filename = os.path.basename(self.current_cbz)
+        
+            chapter_number_match = re.search(r'c\d{3}(\.\d+)?', filename)
+            if not chapter_number_match:
+                self.show_status('Invalid chapter number in file name', 'red')
+                return False
+            chapter_number = chapter_number_match.group(0)
 
-        new_filename = f"{series_name} - {chapter_number}.cbz"
-        new_filepath = os.path.join(os.path.dirname(self.current_cbz), new_filename)
+            season_info_match = re.search(r'(Season \d+ (Start|End)|Series (Start|End))', filename)
+            season_info = season_info_match.group(0) if season_info_match else ""
+
+            if season_info:
+                new_filename = f"{series_name} - {chapter_number} - {season_info}.cbz"
+            else:
+                new_filename = f"{series_name} - {chapter_number}.cbz"
+
+            new_filepath = os.path.join(os.path.dirname(self.current_cbz), new_filename)
+        else:
+            new_filepath = self.current_cbz  # Use original path for overwrite
 
         try:
             with zipfile.ZipFile(new_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for file in os.listdir(self.temp_dir):
                     if file not in self.deleted_files:
                         zipf.write(os.path.join(self.temp_dir, file), arcname=file)
-            if os.path.exists(self.current_cbz):
-                os.remove(self.current_cbz)
-            self.current_cbz = new_filepath
+            if not overwrite:  # Only delete original and update path if not overwriting
+                if os.path.exists(self.current_cbz):
+                    os.remove(self.current_cbz)
+                self.current_cbz = new_filepath
             self.show_status('Saved successfully!', 'green')
             return True
         except Exception as e:
             self.show_status(f'Save failed: {str(e)}', 'red')
             return False
+
+    def save_overwrite_and_next(self):
+        if self.current_cbz and self.save_cbz(overwrite=True):
+            self.load_next_cbz()
 
     def show_status(self, message, color):
         self.save_btn.config(style=f'{color}.TButton')
