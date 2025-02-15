@@ -53,6 +53,9 @@ class CBZEditor:
         # Bind the "r" key to refresh thumbnails
         self.root.bind('r', lambda e: self.refresh_thumbnails())
 
+        # Track if we are doing a partial refresh (top 4 images)
+        self.partial_refresh = False
+
     def set_dark_theme(self):
         self.root.configure(bg='#2d2d2d')
         self.style = ttk.Style()
@@ -81,16 +84,21 @@ class CBZEditor:
         self.save_btn = ttk.Button(control_frame, text='💾 Save', width=15, style='Large.TButton', command=self.save_and_next)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text='✖ Close', command=self.close_and_next).pack(side=tk.LEFT, padx=5)
+
+        # Series name input box
+        self.series_name_entry = ttk.Entry(control_frame, font=('Arial', 12))
+        self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # Added label to show sorting order
+        self.sort_label = ttk.Label(control_frame, text="  Order: First", font=('Arial', 10))
+        self.sort_label.pack(side=tk.LEFT, padx=10)
+
         toolbar = ttk.Frame(main_frame)
         toolbar.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(toolbar, text='Thumbnail Size:').pack(side=tk.LEFT)
         self.size_slider = ttk.Scale(toolbar, from_=100, to=500, command=lambda e: self.update_thumbnail_size())
         self.size_slider.set(self.thumbnail_size)
         self.size_slider.pack(side=tk.LEFT, padx=5)
-
-        # Added label to show sorting order
-        self.sort_label = ttk.Label(toolbar, text="  Order: First", font=('Arial', 10))
-        self.sort_label.pack(side=tk.LEFT, padx=10)
 
         self.canvas = tk.Canvas(main_frame, bg='#2d2d2d', highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.canvas.yview)
@@ -229,6 +237,13 @@ class CBZEditor:
             # Sort the images based on the current sorting order (ascending or descending)
             image_files = sorted([f for f in os.listdir(self.temp_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))], 
                                  key=lambda x: [(int(c) if c.isdigit() else c) for c in re.split('(\\d+)', x)], reverse=not self.sort_order)
+
+            # Only show the top 4 images for quicker display
+            if self.partial_refresh:
+                image_files = image_files[:4]  # Load top 4 images
+            else:
+                self.partial_refresh = False  # Reset after full refresh
+
         except:
             image_files = sorted(os.listdir(self.temp_dir), reverse=not self.sort_order)
 
@@ -301,6 +316,7 @@ class CBZEditor:
 
     def refresh_thumbnails(self):
         """Refresh the thumbnails (reload the images)."""
+        self.partial_refresh = False  # Full refresh
         self.needs_refresh = True
         self.display_images()
 
@@ -329,10 +345,26 @@ class CBZEditor:
         if not self.current_cbz or not self.temp_dir:
             self.show_status('No CBZ loaded!', 'red')
             return False
+
+        # Get the series name from the entry box
+        series_name = self.series_name_entry.get().strip()
+
+        # Extract the chapter number from the current CBZ file name
+        filename = os.path.basename(self.current_cbz)
+        chapter_number = re.search(r'c\d{3}', filename)
+        if chapter_number:
+            chapter_number = chapter_number.group(0)  # Get the matched chapter number
+        else:
+            self.show_status('Invalid chapter number in file name', 'red')
+            return False
+
+        # Rename the file with the format "Series Name - cXXX.cbz"
+        new_filename = f"{series_name} - {chapter_number}.cbz"
+        new_filepath = os.path.join(os.path.dirname(self.current_cbz), new_filename)
+
         try:
-            with zipfile.ZipFile(self.current_cbz, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for file in os.listdir(self.temp_dir):
-                    zipf.write(os.path.join(self.temp_dir, file), arcname=file)
+            os.rename(self.current_cbz, new_filepath)
+            self.current_cbz = new_filepath  # Update the current CBZ path
             self.show_status('Saved successfully!', 'green')
             return True
         except Exception as e:
