@@ -1,3 +1,8 @@
+# CBZ Editor.pyw
+# GUI application for editing CBZ comic archives with image management capabilities
+# See requirements.txt to import and use: pip install -r requirements.txt
+VERSION = "v1.7.0"
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import zipfile
@@ -14,7 +19,7 @@ class CBZEditor:
 
     def __init__(self, root):
         self.root = root
-        self.root.title('CBZ Editor')
+        root.title(f"CBZ Editor - {VERSION}")
         self.root.geometry('1200x800')
         self.current_cbz = None
         self.temp_dir = None
@@ -27,8 +32,7 @@ class CBZEditor:
         self.needs_refresh = False
         self.resize_timer = None
         self.image_frames = {}
-        self.base_temp_dir = os.path.join(tempfile.gettempdir(),
-            'CBZ_Editor_Temp')
+        self.base_temp_dir = os.path.join(tempfile.gettempdir(), 'CBZ_Editor_Temp')
         self.monitor_active = False
         self.file_timestamps = {}
         self.executor = ThreadPoolExecutor(max_workers=4)
@@ -49,6 +53,18 @@ class CBZEditor:
         self.partial_refresh = False
         self.hotkeys_enabled = True
 
+        # New hotkey bindings
+        self.root.bind('v', lambda e: self.save_overwrite_and_next())
+        self.root.bind('q', lambda e: self.toggle_swap_delete())
+        
+        # Add help button
+        self.help_button = ttk.Button(self.root, text='?', width=2, command=self.toggle_help)
+        self.help_button.place(relx=1.0, rely=0.0, anchor='ne', x=-10, y=10)
+        
+        # Help panel
+        self.help_frame = ttk.Frame(self.root, style='Help.TFrame')
+        self.help_labels = []
+
     def set_dark_theme(self):
         self.root.configure(bg='#2d2d2d')
         self.style = ttk.Style()
@@ -61,6 +77,54 @@ class CBZEditor:
         self.style.configure('Large.TButton', font=('Arial', 12, 'bold'), padding=10)
         self.style.configure('green.TButton', background='#006600')
         self.style.configure('red.TButton', background='#660000')
+        self.style.configure('Help.TFrame', background='#404040')
+        self.style.configure('Help.TLabel', background='#404040', foreground='white')
+
+    def toggle_swap_delete(self):
+        """Toggle the swap on delete state with Q key"""
+        current_state = self.swap_on_delete.get()
+        self.swap_on_delete.set(not current_state)
+        self.update_swap_label()
+
+    def toggle_help(self, event=None):
+        """Show/hide hotkey help panel"""
+        if self.help_frame.winfo_ismapped():
+            self.help_frame.place_forget()
+        else:
+            self.show_help()
+
+    def show_help(self):
+        """Display hotkey help panel"""
+        hotkeys = [
+            ("Q", "Toggle Keep/Swap sort on Delete"),
+            ("V", "Overwrite and next"),
+            ("S", "Toggle sort order"),
+            ("R", "Refresh thumbnails"),
+            ("←/→", "Previous/Next CBZ"),
+            ("Ctrl+S", "Save and next"),
+            ("Ctrl+W", "Close and next")
+        ]
+        
+        # Clear old labels
+        for label in self.help_labels:
+            label.destroy()
+        self.help_labels = []
+        
+        # Create new labels
+        for i, (key, desc) in enumerate(hotkeys):
+            lbl = ttk.Label(self.help_frame, text=f"{key}: {desc}", style='Help.TLabel')
+            lbl.grid(row=i, column=0, sticky='w', padx=10, pady=2)
+            self.help_labels.append(lbl)
+        
+        # Position help panel
+        self.help_frame.place(relx=1.0, rely=0.0, anchor='ne', x=-40, y=40)
+        self.root.bind('<Button-1>', self.close_help_if_outside)
+
+    def close_help_if_outside(self, event):
+        """Close help panel if clicked outside"""
+        if not self.help_frame.winfo_contain(event.x, event.y):
+            self.help_frame.place_forget()
+            self.root.unbind('<Button-1>')
 
     def create_widgets(self):
         main_frame = ttk.Frame(self.root)
@@ -71,39 +135,37 @@ class CBZEditor:
         self.title_label.pack(pady=5, expand=True, fill=tk.X, anchor='center')
         control_frame = ttk.Frame(header_frame)
         control_frame.pack(pady=10)
-    
+
         batch_btn = ttk.Button(control_frame, text='Batch Create CBZs', command=self.batch_create_cbzs)
         batch_btn.pack(side=tk.LEFT, padx=5)
-    
+
         self.series_name_entry = ttk.Entry(control_frame, font=('Arial', 12), foreground='black')
         self.series_name_entry.pack(side=tk.LEFT, padx=5, pady=5)
-    
+
         ttk.Button(control_frame, text='📂 Open', command=self.open_cbz).pack(side=tk.LEFT, padx=5)
         self.save_btn = ttk.Button(control_frame, text='💾 Save', width=15, style='TButton', command=self.save_and_next)
         self.save_btn.pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text='✏ Overwrite', command=self.save_overwrite_and_next).pack(side=tk.LEFT, padx=5)  # New Overwrite button
+        self.overwrite_btn = ttk.Button(control_frame, text='✏ Overwrite', command=self.save_overwrite_and_next)  # Store reference to overwrite button
+        self.overwrite_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(control_frame, text='✖ Close', command=self.close_and_next).pack(side=tk.LEFT, padx=5)
-    
+
         toolbar = ttk.Frame(main_frame)
         toolbar.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(toolbar, text='Thumbnail Size:').pack(side=tk.LEFT)
         self.size_slider = ttk.Scale(toolbar, from_=100, to=500, command=lambda e: self.update_thumbnail_size())
         self.size_slider.set(self.thumbnail_size)
         self.size_slider.pack(side=tk.LEFT, padx=5)
-    
+
         self.sort_label = ttk.Label(toolbar, text="  Order: First", font=('Arial', 10))
         self.sort_label.pack(side=tk.LEFT, padx=10)
-    
-        self.swap_checkbox = ttk.Checkbutton(toolbar, 
-                                           variable=self.swap_on_delete,
-                                           command=self.update_swap_label,
-                                           style="TCheckbutton")
+
+        self.swap_checkbox = ttk.Checkbutton(toolbar, variable=self.swap_on_delete, command=self.update_swap_label, style="TCheckbutton")
         self.swap_checkbox.pack(side=tk.LEFT, padx=10)
         self.swap_label = ttk.Label(toolbar, text="Keep sort on Delete")
         self.swap_label.pack(side=tk.LEFT)
-        
+
         self.style.configure('TCheckbutton', foreground='black', font=('Arial', 12))
-    
+
         self.canvas = tk.Canvas(main_frame, bg='#2d2d2d', highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         self.image_frame = ttk.Frame(self.canvas)
@@ -111,11 +173,82 @@ class CBZEditor:
         self.canvas.create_window((0, 0), window=self.image_frame, anchor=tk.NW)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
+
         self.series_name_entry.bind("<FocusIn>", self.disable_hotkeys)
         self.series_name_entry.bind("<FocusOut>", self.enable_hotkeys)
         self.series_name_entry.bind("<Return>", self.enable_hotkeys)
 
+    def has_nested_images(self):
+        """Check if images exist in subdirectories"""
+        for root, dirs, files in os.walk(self.temp_dir):
+            if root == self.temp_dir:
+                continue  # Skip root directory
+            if any(f.lower().endswith(('.png', '.jpg', '.jpeg')) for f in files):
+                return True
+        return False
+
+    def flatten_cbz_structure(self):
+        """Move images from subfolders to root, delete XMLs, and clean empty dirs"""
+        try:
+            # First delete all XML files in subdirectories
+            for root, dirs, files in os.walk(self.temp_dir):
+                if root == self.temp_dir:
+                    continue  # Skip root directory
+                
+                # Delete XMLs first
+                for file in files:
+                    if file.lower().endswith('.xml'):
+                        try:
+                            os.remove(os.path.join(root, file))
+                        except Exception as e:
+                            print(f"Error deleting XML: {e}")
+
+            # Now move images and handle remaining files
+            for root, dirs, files in os.walk(self.temp_dir):
+                if root == self.temp_dir:
+                    continue
+                
+                for file in files:
+                    src = os.path.join(root, file)
+                    dest = os.path.join(self.temp_dir, file)
+                    
+                    # Skip if source doesn't exist (might have been deleted)
+                    if not os.path.exists(src):
+                        continue
+                    
+                    # Handle duplicate filenames
+                    counter = 1
+                    while os.path.exists(dest):
+                        name, ext = os.path.splitext(file)
+                        dest = os.path.join(self.temp_dir, f"{name}_{counter}{ext}")
+                        counter += 1
+                    
+                    shutil.move(src, dest)
+
+            # Delete any remaining XML files in root directory
+            for file in os.listdir(self.temp_dir):
+                if file.lower().endswith('.xml'):
+                    try:
+                        os.remove(os.path.join(self.temp_dir, file))
+                    except Exception as e:
+                        print(f"Error deleting root XML: {e}")
+
+            # Remove empty directories
+            for root, dirs, files in os.walk(self.temp_dir, topdown=False):
+                if root == self.temp_dir:
+                    continue
+                try:
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                except Exception as e:
+                    print(f"Error removing directory: {e}")
+
+            # Refresh display
+            self.needs_refresh = True
+            self.display_images()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to flatten structure: {str(e)}")
 
     def update_swap_label(self):
         if self.swap_on_delete.get():
@@ -267,6 +400,23 @@ class CBZEditor:
     def display_images(self):
         if not self.temp_dir or not self.needs_refresh:
             return
+        
+        # Check if we need to show the fix structure button
+        root_images = any(f.lower().endswith(('.png', '.jpg', '.jpeg')) 
+                      for f in os.listdir(self.temp_dir))
+        has_nested = self.has_nested_images()
+        
+        if not root_images and has_nested:
+            # Show big fix structure button
+            for widget in self.image_frame.winfo_children():
+                widget.destroy()
+                
+            btn = ttk.Button(self.image_frame, text="Click to Fix Folder Structure", 
+                           command=self.flatten_cbz_structure, style='Large.TButton')
+            btn.pack(expand=True, fill=tk.BOTH, padx=50, pady=50)
+            return
+
+        # Existing display logic continues here...
         try:
             image_files = sorted([f for f in os.listdir(self.temp_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))], 
                                  key=lambda x: [(int(c) if c.isdigit() else c) for c in re.split('(\\d+)', x)], reverse=not self.sort_order)
@@ -431,7 +581,8 @@ class CBZEditor:
                 if os.path.exists(self.current_cbz):
                     os.remove(self.current_cbz)
                 self.current_cbz = new_filepath
-            self.show_status('Saved successfully!', 'green')
+            if not overwrite:  # Only show save status if not overwriting
+                self.show_status('Saved successfully!', 'green')
             return True
         except Exception as e:
             self.show_status(f'Save failed: {str(e)}', 'red')
@@ -439,11 +590,14 @@ class CBZEditor:
 
     def save_overwrite_and_next(self):
         if self.current_cbz and self.save_cbz(overwrite=True):
+            self.show_status('Overwritten successfully!', 'green', self.overwrite_btn)  # Flash the overwrite button
             self.load_next_cbz()
 
-    def show_status(self, message, color):
-        self.save_btn.config(style=f'{color}.TButton')
-        self.root.after(2000, lambda: self.save_btn.config(style='TButton'))
+    def show_status(self, message, color, button=None):
+        """Show status message and flash a button (defaults to save_btn if no button is provided)"""
+        target_button = button if button else self.save_btn
+        target_button.config(style=f'{color}.TButton')
+        self.root.after(2000, lambda: target_button.config(style='TButton'))
 
     def save_and_next(self):
         if self.current_cbz and self.save_cbz():
